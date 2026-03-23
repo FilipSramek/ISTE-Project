@@ -5,6 +5,12 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_SUPPRESS_REGENERATION ON)
+
+# Workaround: prevent FindDoxygen from running inside Pico SDK docs on Windows
+# paths with non-ASCII characters, where template generation can fail.
+set(CMAKE_DISABLE_FIND_PACKAGE_Doxygen TRUE)
+set(DOXYGEN_FOUND FALSE)
 
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
@@ -44,19 +50,33 @@ pico_set_program_version(ISTE-Project "0.1")
 pico_enable_stdio_uart(ISTE-Project 0)
 pico_enable_stdio_usb(ISTE-Project 0)
 
-# Add the standard library to the build
-target_link_libraries(ISTE-Project
-        pico_stdlib)
+# Pico SDK libraries required by the current project sources.
+set(PROJECT_SDK_LIBS
+    pico_stdlib
+    hardware_spi
+    hardware_gpio
+    hardware_i2c
+    hardware_adc
+    hardware_uart
+    hardware_timer
+    hardware_pwm
+    hardware_watchdog
+)
+
+target_link_libraries(ISTE-Project PRIVATE
+    ${PROJECT_SDK_LIBS}
+)
 
 # Add the standard include files to the build
 target_include_directories(ISTE-Project PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-# Add any user requested libraries
-target_link_libraries(ISTE-Project 
-        hardware_spi
-        )
-
-pico_add_extra_outputs(ISTE-Project)
+# Avoid linker map output on non-ASCII Windows paths.
+pico_add_dis_output(ISTE-Project)
+pico_add_hex_output(ISTE-Project)
+pico_add_bin_output(ISTE-Project)
+if (NOT (PICO_NO_UF2 OR PICO_NO_PICOTOOL))
+    pico_add_uf2_output(ISTE-Project)
+endif()
 
