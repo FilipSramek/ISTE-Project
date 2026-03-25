@@ -3,11 +3,11 @@
  * @brief Example SD Card driver usage for telemetry storage.
  */
 
-#include "driver/sd/sd.hpp"
+#include "drivers/sd/sd.hpp"
 #include "hal/gpio/gpio.hpp"
 #include "hal/spi/spi.hpp"
 #include "hal/timer/timer.hpp"
-#include "pico/stdlib.h"
+#include "utils/stdlib/stdint.h"
 
 namespace
 {

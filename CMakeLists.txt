@@ -41,7 +41,19 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(ISTE-Project main.cpp )
+add_executable(ISTE-Project
+    app/main.cpp
+    app/app_init.cpp
+    drivers/bmp280/bmp280.cpp
+    drivers/ina219/ina219.cpp
+    drivers/voltage_divider/voltage_divider.cpp
+    drivers/sx1278/sx1278.cpp
+    hal/i2c/i2c.cpp
+    hal/spi/spi.cpp
+    hal/gpio/gpio.cpp
+    hal/adc/adc.cpp
+    hal/timer/timer.cpp
+)
 
 pico_set_program_name(ISTE-Project "ISTE-Project")
 pico_set_program_version(ISTE-Project "0.1")
