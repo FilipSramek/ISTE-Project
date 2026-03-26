@@ -110,6 +110,19 @@ namespace hal
 		 */
 		bool receive(uint8_t* buffer, uint32_t& length) override;
 
+		/**
+		 * @brief Change active I2C device address.
+		 * @param address New 7-bit address
+		 * @return true if address was accepted
+		 */
+		bool set_address(uint8_t address);
+
+		/**
+		 * @brief Get active I2C device address.
+		 * @return Current 7-bit address
+		 */
+		uint8_t get_address() const;
+
 	private:
 		/**
 		 * @brief Validate the current configuration.

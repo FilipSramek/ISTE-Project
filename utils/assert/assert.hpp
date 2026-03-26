@@ -5,19 +5,7 @@
 
 namespace utils
 {
-    inline void assert_failed(const char* file, uint32_t line, const char* expression)
-    {
-        // Handle assertion failure - can be customized for your platform
-        // Options: halt, log, blink LED, etc.
-        (void)file;
-        (void)line;
-        (void)expression;
-        
-        while (1)
-        {
-            // Infinite loop or platform-specific halt
-        }
-    }
+    void assert_failed(const char* file, uint32_t line, const char* expression);
 } // namespace utils
 
 #ifdef NDEBUG

@@ -114,6 +114,12 @@ namespace drivers
 		bool is_initialized() const override;
 
 		/**
+		 * @brief Get the last driver error message.
+		 * @return Pointer to internal null-terminated text
+		 */
+		const char* last_error() const;
+
+		/**
 		 * @brief Read sensor data directly.
 		 * @param data Reference to data structure to fill
 		 * @return true if read succeeded
@@ -203,9 +209,16 @@ namespace drivers
 		 */
 		float convert_power_(uint16_t raw) const;
 
+		/**
+		 * @brief Save description of the last error.
+		 * @param message Null-terminated text
+		 */
+		void set_last_error_(const char* message);
+
 		hal::I2C& i2c_;
 		Config config_;
 		Data current_data_;
+		char last_error_[96];
 		bool initialized_;
 
 		uint16_t calibration_value_;

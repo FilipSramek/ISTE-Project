@@ -43,4 +43,5 @@ namespace app
     };
 
     bool init(AppContext& context);
+    const char* last_init_error();
 }

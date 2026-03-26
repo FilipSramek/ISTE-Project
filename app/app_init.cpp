@@ -1,5 +1,117 @@
 #include "app/app_init.hpp"
 
+#include <stdio.h>
+
+namespace
+{
+    char g_last_init_error[160] = "init not started";
+    constexpr uint8_t INA219_REG_CONFIG = 0x00U;
+    constexpr bool ENABLE_I2C_DEBUG_SCANNER = true;
+    constexpr uint8_t I2C_SCAN_START_ADDRESS = 0x08U;
+    constexpr uint8_t I2C_SCAN_END_ADDRESS = 0x77U;
+    constexpr uint32_t I2C_SCAN_TIMEOUT_US = 2000U;
+
+    void set_last_init_error(const char* message)
+    {
+        if (message == nullptr)
+        {
+            (void)snprintf(g_last_init_error, sizeof(g_last_init_error), "%s", "unknown init error");
+            return;
+        }
+
+        (void)snprintf(g_last_init_error, sizeof(g_last_init_error), "%s", message);
+    }
+
+    void set_last_init_error_with_detail(const char* prefix, const char* detail)
+    {
+        const char* safe_prefix = (prefix != nullptr) ? prefix : "init failed";
+        const char* safe_detail = (detail != nullptr) ? detail : "unknown reason";
+        (void)snprintf(g_last_init_error, sizeof(g_last_init_error), "%s: %s", safe_prefix, safe_detail);
+    }
+
+    void log_init_checkpoint(const char* message)
+    {
+        printf("[INIT] %s\n", message);
+    }
+
+    void debug_scan_i2c_bus(i2c_inst_t* instance)
+    {
+        if (!ENABLE_I2C_DEBUG_SCANNER || (instance == nullptr))
+        {
+            return;
+        }
+
+        printf("[I2C-SCAN] Scanning bus...\n");
+        bool found_any = false;
+        uint8_t probe_byte = 0U;
+
+        for (uint8_t address = I2C_SCAN_START_ADDRESS; address <= I2C_SCAN_END_ADDRESS; ++address)
+        {
+            // Some devices ACK write probe but NACK direct read probe.
+            const int write_probe = i2c_write_timeout_us(instance,
+                                                         address,
+                                                         &probe_byte,
+                                                         0U,
+                                                         false,
+                                                         I2C_SCAN_TIMEOUT_US);
+
+            const int read_probe = i2c_read_timeout_us(instance,
+                                                       address,
+                                                       &probe_byte,
+                                                       1U,
+                                                       false,
+                                                       I2C_SCAN_TIMEOUT_US);
+
+            if ((write_probe >= 0) || (read_probe >= 0))
+            {
+                found_any = true;
+                if ((write_probe >= 0) && (read_probe >= 0))
+                {
+                    printf("[I2C-SCAN] ACK at 0x%02X (R/W)\n", address);
+                }
+                else if (write_probe >= 0)
+                {
+                    printf("[I2C-SCAN] ACK at 0x%02X (W only)\n", address);
+                }
+                else
+                {
+                    printf("[I2C-SCAN] ACK at 0x%02X (R only)\n", address);
+                }
+            }
+        }
+
+        if (!found_any)
+        {
+            printf("[I2C-SCAN] No devices responded\n");
+        }
+    }
+
+    bool probe_ina219_config_register(hal::I2C& i2c, uint8_t address, uint16_t& value)
+    {
+        if (!i2c.set_address(address))
+        {
+            return false;
+        }
+
+        uint8_t reg = INA219_REG_CONFIG;
+        if (!i2c.write(&reg, 1U))
+        {
+            return false;
+        }
+
+        uint8_t buffer[2] = {0U, 0U};
+        uint32_t length = 2U;
+        if (!i2c.receive(buffer, length) || (length != 2U))
+        {
+            return false;
+        }
+
+        value = static_cast<uint16_t>((static_cast<uint16_t>(buffer[0]) << 8U) |
+                                      static_cast<uint16_t>(buffer[1]));
+        return true;
+    }
+}
+
 namespace
 {
     hal::I2C::Config make_i2c_config(uint8_t address)
@@ -151,51 +263,131 @@ namespace app
 
     bool init(AppContext& context)
     {
+        log_init_checkpoint("Initialization started");
+        set_last_init_error("unknown init error");
+
         if (!context.i2c_bmp280.init())
         {
+            set_last_init_error("i2c_bmp280.init() failed (addr 0x76)");
             return false;
         }
+        log_init_checkpoint("I2C BMP280 bus initialized");
 
         if (!context.i2c_ina219.init())
         {
+            set_last_init_error("i2c_ina219.init() failed (addr 0x40)");
             return false;
         }
+        log_init_checkpoint("I2C INA219 bus initialized");
+
+        // Debug-only scanner to quickly see what is present on the I2C bus.
+        debug_scan_i2c_bus(i2c0);
 
         if (!context.spi.init())
         {
+            set_last_init_error("spi.init() failed");
             return false;
         }
+        log_init_checkpoint("SPI initialized");
 
-        if (!context.gpio_nss.init() || !context.gpio_reset.init() || !context.gpio_dio0.init())
+        if (!context.gpio_nss.init())
         {
+            set_last_init_error("gpio_nss.init() failed (pin 17)");
             return false;
         }
+        log_init_checkpoint("GPIO NSS initialized");
+
+        if (!context.gpio_reset.init())
+        {
+            set_last_init_error("gpio_reset.init() failed (pin 20)");
+            return false;
+        }
+        log_init_checkpoint("GPIO RESET initialized");
+
+        if (!context.gpio_dio0.init())
+        {
+            set_last_init_error("gpio_dio0.init() failed (pin 21)");
+            return false;
+        }
+        log_init_checkpoint("GPIO DIO0 initialized");
 
         if (!context.bmp280.init())
         {
+            set_last_init_error_with_detail("bmp280.init() failed", context.bmp280.last_error());
             return false;
         }
+        log_init_checkpoint("BMP280 sensor initialized");
 
-        if (!context.ina219.init())
+        constexpr uint8_t ina219_first_address = 0x40U;
+        constexpr uint8_t ina219_last_address = 0x4FU;
+        bool ina219_initialized = false;
+        bool ina219_any_probe = false;
+
+        for (uint8_t address = ina219_first_address; address <= ina219_last_address; ++address)
         {
+            uint16_t config_reg = 0U;
+            if (probe_ina219_config_register(context.i2c_ina219, address, config_reg))
+            {
+                ina219_any_probe = true;
+                printf("[INIT] INA219 probe ACK on 0x%02X, CONFIG=0x%04X\n", address, config_reg);
+            }
+
+            if (!context.i2c_ina219.set_address(address))
+            {
+                continue;
+            }
+
+            if (context.ina219.init())
+            {
+                printf("[INIT] INA219 sensor initialized on 0x%02X\n", address);
+                ina219_initialized = true;
+                break;
+            }
+
+            printf("[INIT] INA219 init failed on 0x%02X: %s\n", address, context.ina219.last_error());
+        }
+
+        if (!ina219_initialized)
+        {
+            if (!ina219_any_probe)
+            {
+                set_last_init_error("ina219 not detected on 0x40-0x4F (no I2C ACK)");
+                return false;
+            }
+
+            set_last_init_error_with_detail("ina219.init() failed", context.ina219.last_error());
             return false;
         }
 
         if (!context.voltage_divider_1.init())
         {
+            set_last_init_error("voltage_divider_1.init() failed");
             return false;
         }
+        log_init_checkpoint("Voltage divider 1 initialized");
 
         if (!context.voltage_divider_2.init())
         {
+            set_last_init_error("voltage_divider_2.init() failed");
             return false;
         }
+        log_init_checkpoint("Voltage divider 2 initialized");
 
         if (!context.sx1278.init())
         {
+            set_last_init_error("sx1278.init() failed");
             return false;
         }
+        log_init_checkpoint("SX1278 initialized");
+
+        set_last_init_error("none");
+        log_init_checkpoint("Initialization finished successfully");
 
         return true;
+    }
+
+    const char* last_init_error()
+    {
+        return g_last_init_error;
     }
 }

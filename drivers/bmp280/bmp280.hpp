@@ -131,6 +131,12 @@ namespace drivers
 		 */
 		bool is_initialized() const override;
 
+		/**
+		 * @brief Get the last initialization/read error message.
+		 * @return Pointer to internal null-terminated string
+		 */
+		const char* last_error() const;
+
 	private:
 		/**
 		 * @brief BMP280 register addresses.
@@ -238,10 +244,17 @@ namespace drivers
 		 */
 		bool configure_sensor_();
 
+		/**
+		 * @brief Store text describing the last driver error.
+		 * @param message Null-terminated text message
+		 */
+		void set_last_error_(const char* message);
+
 		hal::I2C& i2c_;
 		Config config_;
 		CalibData calib_;
 		Data current_data_;
+		char last_error_[96];
 		bool initialized_;
 
 		static constexpr uint8_t CHIP_ID = 0x58;

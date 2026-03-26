@@ -10,6 +10,11 @@
 
 namespace hal
 {
+	namespace
+	{
+		constexpr uint32_t I2C_TRANSFER_TIMEOUT_US = 5000U;
+	}
+
 	void PicoI2CBackend::init(i2c_inst_t* instance, uint32_t baudrate)
 	{
 		ASSERT(instance != nullptr);
@@ -42,11 +47,17 @@ namespace hal
 		ASSERT(length != 0U);
 		ASSERT(address < 0x80U);
 
-		return i2c_write_blocking(instance,
-								  address,
-								  data,
-								  static_cast<size_t>(length),
-								  no_stop);
+		if ((instance == nullptr) || (data == nullptr) || (length == 0U) || (address >= 0x80U))
+		{
+			return PICO_ERROR_GENERIC;
+		}
+
+		return i2c_write_timeout_us(instance,
+									address,
+									data,
+									static_cast<size_t>(length),
+									no_stop,
+									I2C_TRANSFER_TIMEOUT_US);
 	}
 
 	int PicoI2CBackend::read(i2c_inst_t* instance,
@@ -60,11 +71,17 @@ namespace hal
 		ASSERT(length != 0U);
 		ASSERT(address < 0x80U);
 
-		return i2c_read_blocking(instance,
-								 address,
-								 buffer,
-								 static_cast<size_t>(length),
-								 no_stop);
+		if ((instance == nullptr) || (buffer == nullptr) || (length == 0U) || (address >= 0x80U))
+		{
+			return PICO_ERROR_GENERIC;
+		}
+
+		return i2c_read_timeout_us(instance,
+								   address,
+								   buffer,
+								   static_cast<size_t>(length),
+								   no_stop,
+								   I2C_TRANSFER_TIMEOUT_US);
 	}
 
 	I2C::I2C(const Config& config, II2CBackend& backend)
@@ -142,6 +159,22 @@ namespace hal
 
 		length = static_cast<uint32_t>(result);
 		return (length == requested);
+	}
+
+	bool I2C::set_address(uint8_t address)
+	{
+		if (address >= 0x80U)
+		{
+			return false;
+		}
+
+		config_.address = address;
+		return true;
+	}
+
+	uint8_t I2C::get_address() const
+	{
+		return config_.address;
 	}
 
 	bool I2C::is_valid_config_() const

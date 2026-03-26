@@ -4,6 +4,8 @@
  */
 
 #include "drivers/ina219/ina219.hpp"
+
+#include <stdio.h>
 #include "utils/assert/assert.hpp"
 
 namespace drivers
@@ -12,11 +14,13 @@ namespace drivers
 		: i2c_(i2c),
 		  config_(config),
 		  current_data_{0.0f, 0.0f, 0.0f, 0.0f, false},
+		  last_error_{0},
 		  initialized_(false),
 		  calibration_value_(0),
 		  current_lsb_(0.0f),
 		  power_lsb_(0.0f)
 	{
+		set_last_error_("not initialized");
 	}
 
 	bool INA219::init()
@@ -27,6 +31,7 @@ namespace drivers
 
 		if (initialized_)
 		{
+			set_last_error_("already initialized");
 			return false;
 		}
 
@@ -42,12 +47,18 @@ namespace drivers
 
 		initialized_ = true;
 		current_data_.valid = false;
+		set_last_error_("none");
 		return true;
 	}
 
 	bool INA219::is_initialized() const
 	{
 		return initialized_;
+	}
+
+	const char* INA219::last_error() const
+	{
+		return last_error_;
 	}
 
 	bool INA219::read(Data& data)
@@ -131,7 +142,13 @@ namespace drivers
 						 static_cast<uint8_t>((value >> 8) & 0xFFU),
 						 static_cast<uint8_t>(value & 0xFFU)};
 
-		return i2c_.write(buffer, 3);
+		if (!i2c_.write(buffer, 3))
+		{
+			set_last_error_("i2c write failed");
+			return false;
+		}
+
+		return true;
 	}
 
 	bool INA219::read_register_(Register reg, uint16_t& value)
@@ -142,6 +159,7 @@ namespace drivers
 
 		if (!i2c_.write(&reg_addr, 1))
 		{
+			set_last_error_("register select write failed");
 			return false;
 		}
 
@@ -150,6 +168,7 @@ namespace drivers
 
 		if (!i2c_.receive(buffer, length))
 		{
+			set_last_error_("register read failed");
 			return false;
 		}
 
@@ -176,10 +195,17 @@ namespace drivers
 
 		if (!write_register_(Register::CALIBRATION, calibration_value_))
 		{
+			set_last_error_("failed to write CALIBRATION register");
 			return false;
 		}
 
-		return write_register_(Register::CONFIG, config_reg);
+		if (!write_register_(Register::CONFIG, config_reg))
+		{
+			set_last_error_("failed to write CONFIG register");
+			return false;
+		}
+
+		return true;
 	}
 
 	bool INA219::compute_calibration_()
@@ -189,6 +215,7 @@ namespace drivers
 
 		if ((config_.shunt_resistance <= 0.0f) || (config_.max_expected_current <= 0.0f))
 		{
+			set_last_error_("invalid shunt_resistance or max_expected_current");
 			return false;
 		}
 
@@ -198,6 +225,7 @@ namespace drivers
 		float calibration = CALIBRATION_FACTOR / (current_lsb_ * config_.shunt_resistance);
 		if (calibration < 1.0f)
 		{
+			set_last_error_("computed calibration too low");
 			return false;
 		}
 
@@ -226,5 +254,16 @@ namespace drivers
 	float INA219::convert_power_(uint16_t raw) const
 	{
 		return static_cast<float>(raw) * power_lsb_;
+	}
+
+	void INA219::set_last_error_(const char* message)
+	{
+		if (message == nullptr)
+		{
+			(void)snprintf(last_error_, sizeof(last_error_), "%s", "unknown error");
+			return;
+		}
+
+		(void)snprintf(last_error_, sizeof(last_error_), "%s", message);
 	}
 } // namespace drivers

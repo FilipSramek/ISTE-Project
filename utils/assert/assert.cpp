@@ -5,10 +5,13 @@
 
 namespace utils
 {
-    void assert_failed(const char* file, uint32_t line)
+    void assert_failed(const char* file, uint32_t line, const char* expression)
     {
-        (void)file;
-        (void)line;
+        stdio_flush();
+        printf("\n[ASSERT] %s\n", expression != nullptr ? expression : "<null expression>");
+        printf("[ASSERT] file: %s\n", file != nullptr ? file : "<null file>");
+        printf("[ASSERT] line: %lu\n", static_cast<unsigned long>(line));
+        stdio_flush();
 
         // Intentional fail-stop: stay here forever for debugging.
         while (true)
@@ -17,8 +20,6 @@ namespace utils
             
             gpio_put(PICO_DEFAULT_LED_PIN, !gpio_get(PICO_DEFAULT_LED_PIN));
             sleep_ms(250);
-
-            printf("%s at line %lu\n", file, line);
         }
     }
 } // namespace utils

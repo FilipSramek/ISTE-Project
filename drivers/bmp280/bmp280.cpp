@@ -4,6 +4,7 @@
  */
 
 #include "drivers/bmp280/bmp280.hpp"
+#include <stdio.h>
 #include "utils/assert/assert.hpp"
 
 namespace drivers
@@ -13,8 +14,10 @@ namespace drivers
 		  config_(config),
 		  calib_{},
 		  current_data_{0, 0, false},
+		  last_error_{0},
 		  initialized_(false)
 	{
+		set_last_error_("not initialized");
 	}
 
 	bool BMP280::init()
@@ -23,6 +26,7 @@ namespace drivers
 
 		if (initialized_)
 		{
+			set_last_error_("already initialized");
 			return false;
 		}
 
@@ -43,6 +47,7 @@ namespace drivers
 
 		initialized_ = true;
 		current_data_.valid = false;
+		set_last_error_("none");
 		return true;
 	}
 
@@ -103,9 +108,17 @@ namespace drivers
 		return initialized_;
 	}
 
+	const char* BMP280::last_error() const
+	{
+		return last_error_;
+	}
+
 	bool BMP280::write_register_(Register reg, uint8_t value)
 	{
-		ASSERT(initialized_ || (reg == Register::RESET));
+		ASSERT(initialized_ ||
+			   (reg == Register::RESET) ||
+			   (reg == Register::CONFIG) ||
+			   (reg == Register::CTRL_MEAS));
 
 		uint8_t buffer[2] = {static_cast<uint8_t>(reg), value};
 		return i2c_.write(buffer, 2);
@@ -154,6 +167,7 @@ namespace drivers
 
 		if (!read_registers_(Register::CALIB_START, calib_data, calib_size))
 		{
+			set_last_error_("failed to read calibration data");
 			return false;
 		}
 
@@ -255,10 +269,20 @@ namespace drivers
 		
 		if (!read_register_(Register::ID, chip_id))
 		{
+			set_last_error_("failed to read chip id register 0xD0");
 			return false;
 		}
 
-		return (chip_id == CHIP_ID);
+		if (chip_id != CHIP_ID)
+		{
+			(void)snprintf(last_error_, sizeof(last_error_),
+						   "chip id mismatch: got 0x%02X expected 0x%02X",
+						   chip_id,
+						   CHIP_ID);
+			return false;
+		}
+
+		return true;
 	}
 
 	bool BMP280::configure_sensor_()
@@ -275,6 +299,7 @@ namespace drivers
 
 		if (!write_register_(Register::CONFIG, config_reg))
 		{
+			set_last_error_("failed to write CONFIG register");
 			return false;
 		}
 
@@ -286,9 +311,21 @@ namespace drivers
 
 		if (!write_register_(Register::CTRL_MEAS, ctrl_meas))
 		{
+			set_last_error_("failed to write CTRL_MEAS register");
 			return false;
 		}
 
 		return true;
+	}
+
+	void BMP280::set_last_error_(const char* message)
+	{
+		if (message == nullptr)
+		{
+			(void)snprintf(last_error_, sizeof(last_error_), "%s", "unknown error");
+			return;
+		}
+
+		(void)snprintf(last_error_, sizeof(last_error_), "%s", message);
 	}
 } // namespace drivers

@@ -53,6 +53,7 @@ add_executable(ISTE-Project
     hal/gpio/gpio.cpp
     hal/adc/adc.cpp
     hal/timer/timer.cpp
+    utils/assert/assert.cpp
 )
 
 pico_set_program_name(ISTE-Project "ISTE-Project")
@@ -60,7 +61,7 @@ pico_set_program_version(ISTE-Project "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(ISTE-Project 0)
-pico_enable_stdio_usb(ISTE-Project 0)
+pico_enable_stdio_usb(ISTE-Project 1)
 
 # Pico SDK libraries required by the current project sources.
 set(PROJECT_SDK_LIBS
