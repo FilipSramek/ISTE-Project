@@ -257,7 +257,8 @@ namespace app
           timer(timer_backend),
           bmp280(i2c_bmp280, make_bmp280_config()),
           ina219(i2c_ina219, make_ina219_config()),
-          sx1278(spi, gpio_nss, gpio_reset, gpio_dio0, timer, make_sx1278_config())
+          sx1278(spi, gpio_nss, gpio_reset, gpio_dio0, timer, make_sx1278_config()),
+          soil_sensor(0) // ADC kanál 0, uprav dle zapojení
     {
     }
 
@@ -372,6 +373,9 @@ namespace app
             return false;
         }
         log_init_checkpoint("Voltage divider 2 initialized");
+
+        context.soil_sensor.init();
+        log_init_checkpoint("Soil moisture sensor initialized");
 
         if (!context.sx1278.init())
         {

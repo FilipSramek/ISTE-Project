@@ -4,6 +4,7 @@
 #include "drivers/ina219/ina219.hpp"
 #include "drivers/sx1278/sx1278.hpp"
 #include "drivers/voltage_divider/voltage_divider.hpp"
+#include "drivers/soil_moisture/soil_moisture.hpp"
 #include "hal/adc/adc.hpp"
 #include "hal/gpio/gpio.hpp"
 #include "hal/i2c/i2c.hpp"
@@ -40,6 +41,7 @@ namespace app
         drivers::BMP280 bmp280;
         drivers::INA219 ina219;
         drivers::SX1278 sx1278;
+        soil_moisture::SoilMoistureSensor soil_sensor;
     };
 
     bool init(AppContext& context);
