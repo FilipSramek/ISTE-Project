@@ -10,6 +10,7 @@
 #include "hal/i2c/i2c.hpp"
 #include "hal/spi/spi.hpp"
 #include "hal/timer/timer.hpp"
+#include "app_data.hpp"
 
 namespace app
 {
@@ -47,3 +48,8 @@ namespace app
     bool init(AppContext& context);
     const char* last_init_error();
 }
+
+namespace app {
+    struct AppContext;
+}
+extern app::AppContext* g_app_context_ptr;

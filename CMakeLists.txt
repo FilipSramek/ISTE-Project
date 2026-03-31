@@ -44,6 +44,7 @@ pico_sdk_init()
 add_executable(ISTE-Project
     app/main.cpp
     app/app_init.cpp
+    app/app_data.cpp
     drivers/bmp280/bmp280.cpp
     drivers/ina219/ina219.cpp
     drivers/voltage_divider/voltage_divider.cpp

@@ -395,3 +395,5 @@ namespace app
         return g_last_init_error;
     }
 }
+
+app::AppContext* g_app_context_ptr = nullptr;

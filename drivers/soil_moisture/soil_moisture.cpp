@@ -1,5 +1,6 @@
 #include "soil_moisture.hpp"
 #include "hal/adc/adc.hpp"
+#include "app/app_init.hpp"
 
 namespace soil_moisture {
 
@@ -13,7 +14,12 @@ void SoilMoistureSensor::init() {
 
 uint16_t SoilMoistureSensor::read_raw() const {
     // Čtení surové hodnoty z ADC
-    return hal::adc::read(m_adc_channel);
+    // Správně použít backend z app_context
+    extern app::AppContext* g_app_context_ptr;
+    if (g_app_context_ptr) {
+        return g_app_context_ptr->adc_backend.read(static_cast<uint8_t>(m_adc_channel));
+    }
+    return 0;
 }
 
 float SoilMoistureSensor::read_percent() const {
