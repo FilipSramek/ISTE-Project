@@ -50,6 +50,7 @@ add_executable(ISTE-Project
     drivers/voltage_divider/voltage_divider.cpp
     drivers/sx1278/sx1278.cpp
     drivers/soil_moisture/soil_moisture.cpp
+    drivers/sd/sd.cpp
     hal/i2c/i2c.cpp
     hal/spi/spi.cpp
     hal/gpio/gpio.cpp

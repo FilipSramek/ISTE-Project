@@ -31,6 +31,14 @@ int main()
             uint64_t now = app_context.timer.now_ms();
             switch (state_machine.current) {
                 case app::State::MEASURE: {
+                    // Zapni napájení humidity senzoru (MOSFET)
+                    app_context.gpio_humidity_power.write(true);
+                    printf("[HUMIDITY] Power ON, čekám 1 minutu na stabilizaci...\n");
+                    uint64_t start_wait = app_context.timer.now_ms();
+                    while (app_context.timer.now_ms() - start_wait < 60000) {
+                        sleep_ms(100);
+                    }
+
                     // Voltage divider
                     drivers::VoltageDivider::Data vdiv_data;
                     if (app_context.voltage_divider_1.get_data(vdiv_data) && vdiv_data.valid)
@@ -53,6 +61,10 @@ int main()
                         app::g_last_sensor_data.power_draw = ina_data.power;
                         app::g_last_sensor_data.shunt_current = ina_data.current;
                     }
+
+                    // Vypni napájení humidity senzoru
+                    app_context.gpio_humidity_power.write(false);
+                    printf("[HUMIDITY] Power OFF\n");
 
                     app::g_last_sensor_data.timestamp = time(NULL);
                     state_machine.last_measure_time = now;

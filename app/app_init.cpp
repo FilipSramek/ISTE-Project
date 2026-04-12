@@ -110,7 +110,7 @@ namespace
                                       static_cast<uint16_t>(buffer[1]));
         return true;
     }
-}
+
 
 namespace
 {
@@ -175,6 +175,7 @@ namespace
         };
     }
 
+
     hal::SPI::Config make_spi_config()
     {
         return hal::SPI::Config{
@@ -182,8 +183,29 @@ namespace
             .clk_pin = 18U,
             .mosi_pin = 19U,
             .miso_pin = 16U,
-            .cs_pin = 17U,
+            .cs_pin = 17U, // Hlavní CS pro SX1278
             .baudrate = 1000000U
+        };
+    }
+
+    hal::GPIO::Config make_sd_cs_gpio_config()
+    {
+        return hal::GPIO::Config{
+            .pin = 22U, // Nastav správný pin dle zapojení SD karty
+            .is_output = true,
+            .initial_high = true,
+            .pull_up = false,
+            .pull_down = false
+        };
+    }
+
+    hal::SDCard::Config make_sd_config()
+    {
+        return hal::SDCard::Config{
+            .block_size = 512U,
+            .max_blocks = 32768U, // 16 MB karta, uprav dle potřeby
+            .cmd_timeout_ms = 100U,
+            .data_timeout_ms = 500U
         };
     }
 
@@ -234,6 +256,19 @@ namespace
             .rx_timeout_ms = 100U
         };
     }
+
+    hal::GPIO::Config make_humidity_power_gpio_config()
+    {
+        return hal::GPIO::Config{
+            .pin = 23U, // Nastav správný pin dle zapojení MOSFETu
+            .is_output = true,
+            .initial_high = false, // Po startu vypnuto
+            .pull_up = false,
+            .pull_down = false
+        };
+    }
+}
+
 }
 
 namespace app
@@ -255,15 +290,27 @@ namespace app
           gpio_dio0(make_dio0_gpio_config(), gpio_dio0_backend),
           timer_backend(),
           timer(timer_backend),
+          gpio_sd_cs_backend(),
+          gpio_sd_cs(make_sd_cs_gpio_config(), gpio_sd_cs_backend),
+          sd_backend(spi, gpio_sd_cs, timer),
+          sd_card(make_sd_config(), sd_backend),
           bmp280(i2c_bmp280, make_bmp280_config()),
           ina219(i2c_ina219, make_ina219_config()),
           sx1278(spi, gpio_nss, gpio_reset, gpio_dio0, timer, make_sx1278_config()),
-          soil_sensor(0) // ADC kanál 0, uprav dle zapojení
+          soil_sensor(0),
+          gpio_humidity_power_backend(),
+          gpio_humidity_power(make_humidity_power_gpio_config(), gpio_humidity_power_backend)
     {
     }
 
     bool init(AppContext& context)
     {
+        if (!context.gpio_humidity_power.init()) {
+            set_last_init_error("gpio_humidity_power.init() failed (pin 23)");
+            return false;
+        }
+        log_init_checkpoint("GPIO humidity power initialized");
+
         log_init_checkpoint("Initialization started");
         set_last_init_error("unknown init error");
 
@@ -374,15 +421,33 @@ namespace app
         }
         log_init_checkpoint("Voltage divider 2 initialized");
 
+
         context.soil_sensor.init();
         log_init_checkpoint("Soil moisture sensor initialized");
 
-        if (!context.sx1278.init())
-        {
-            set_last_init_error("sx1278.init() failed");
+        // Inicializace SD karty
+        if (!context.gpio_sd_cs.init()) {
+            set_last_init_error("gpio_sd_cs.init() failed (pin 22)");
             return false;
         }
-        log_init_checkpoint("SX1278 initialized");
+        log_init_checkpoint("GPIO SD CS initialized");
+
+        if (!context.sd_card.init()) {
+            set_last_init_error("sd_card.init() failed");
+            return false;
+        }
+        log_init_checkpoint("SD card initialized");
+
+
+        if (!context.sx1278.init())
+        {
+            log_init_checkpoint("SX1278 init failed!");
+            set_last_init_error("sx1278.init() failed");
+        }
+        else
+        {
+            log_init_checkpoint("SX1278 initialized");
+        }
 
         set_last_init_error("none");
         log_init_checkpoint("Initialization finished successfully");

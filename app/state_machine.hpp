@@ -4,9 +4,9 @@
 
 namespace app {
 
-constexpr float MIN_BATTERY_VOLTAGE = 3.3f; // minimální napětí pro odeslání dat
-constexpr uint32_t MEASURE_INTERVAL_MS = 5 * 60 * 1000; // 5 minut
-constexpr uint32_t SEND_INTERVAL_MS = 15 * 60 * 1000;   // 15 minut
+constexpr float MIN_BATTERY_VOLTAGE = 3.5f; // minimální napětí pro odeslání dat
+constexpr uint32_t MEASURE_INTERVAL_MS = 1 * 60 * 1000; // 1 minut
+constexpr uint32_t SEND_INTERVAL_MS = 1 * 60 * 60 * 1000;   // 1 hodina
 
 enum class State {
     MEASURE,

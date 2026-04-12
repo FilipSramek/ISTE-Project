@@ -4,6 +4,8 @@
 
 namespace soil_moisture {
 
+app::AppContext* g_app_context_ptr = nullptr;
+
 SoilMoistureSensor::SoilMoistureSensor(int adc_channel)
     : m_adc_channel(adc_channel) {}
 
@@ -14,8 +16,6 @@ void SoilMoistureSensor::init() {
 
 uint16_t SoilMoistureSensor::read_raw() const {
     // Čtení surové hodnoty z ADC
-    // Správně použít backend z app_context
-    extern app::AppContext* g_app_context_ptr;
     if (g_app_context_ptr) {
         return g_app_context_ptr->adc_backend.read(static_cast<uint8_t>(m_adc_channel));
     }

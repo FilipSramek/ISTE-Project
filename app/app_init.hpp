@@ -5,6 +5,7 @@
 #include "drivers/sx1278/sx1278.hpp"
 #include "drivers/voltage_divider/voltage_divider.hpp"
 #include "drivers/soil_moisture/soil_moisture.hpp"
+#include "drivers/sd/sd.hpp"
 #include "hal/adc/adc.hpp"
 #include "hal/gpio/gpio.hpp"
 #include "hal/i2c/i2c.hpp"
@@ -39,10 +40,20 @@ namespace app
         hal::PicoTimerBackend timer_backend;
         hal::Timer timer;
 
+        // SD Card
+        hal::PicoGPIOBackend gpio_sd_cs_backend;
+        hal::GPIO gpio_sd_cs;
+        hal::PicoSDCardBackend sd_backend;
+        hal::SDCard sd_card;
+
         drivers::BMP280 bmp280;
         drivers::INA219 ina219;
         drivers::SX1278 sx1278;
         soil_moisture::SoilMoistureSensor soil_sensor;
+
+        // Napájení humidity senzoru
+        hal::PicoGPIOBackend gpio_humidity_power_backend;
+        hal::GPIO gpio_humidity_power;
     };
 
     bool init(AppContext& context);
