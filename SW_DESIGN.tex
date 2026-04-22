@@ -1,0 +1,55 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf-8]{inputenc}
+\usepackage[czech]{babel}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{color}
+
+\title{Softwarový návrh systému ISTE-Project}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Softwarový návrh systému}
+
+Systém ISTE-Project je vestavěná aplikace pro Raspberry Pi Pico určená pro inteligentní monitorování energetických systémů. Softwarová architektura je navržena vrstvovitě, aby umožnila flexibilitu, snadnou údržbu a opakované používání jednotlivých komponent. Tímto modulárním přístupem lze snadno přidávat nové senzory a funkcionalitu bez ovlivňování zbytku aplikace.
+
+\subsection*{Archirektura a vrstvy systému}
+
+Software se skládá ze čtyř základních, na sobě závislých vrstev. Nejnižší vrstva je \textbf{Pico SDK}, která poskytuje základní firmware a funkcionalitu Raspberry Pi Pico, včetně inicializace hardwaru a základních výpočetních funkcí. Nad ní se nachází \textbf{HAL (Hardware Abstraction Layer)}, která zapouzdřuje přístup ke všem hardwarovým komponentám. JAK pracovat s porty GPIO (general purpose input/output), komunikačními sběrnicemi I2C a SPI, analogovo-digitálním převodníkem (ADC), sériovou linkou UART a časovacími zdroji (Timer). Tímto způsobem je hardware funkčnost oddělena od zbytku aplikace, což umožňuje snadnou koupi implementace nebo upgrade bez nutnosti měnit vyšší aplikační vrstvy.
+
+Nad HAL vrstvou se nachází \textbf{driver vrstva}, která obsahuje abstrakci konkrétních senzorů a zařízení. Systém pracuje s baroměrem a teploměrem BMP280, který měří atmosférický tlak a teplotu, s měřičem proudu a napětí INA219 pro monitorování energetických toků, se senzorem vlhkosti půdy pro půdní monitoring, měřičem vysokých napětí pomocí dělače napětí pro měření prvního připojení, s bezdrátovým LoRa rádiem SX1278 pro dlouhém dosahu bezdrátovou komunikaci a s podporou SD karty pro dlouhodobé ukládání a archivaci dat. Každý driver implementuje jednotné rozhraní \texttt{ISensor}, což umožňuje konzistentní a jednotnou práci se všemi zařízeními bez ohledu na jejich konkrétní typu nebo výrobce.
+
+\textbf{Aplikační vrstva} tvoří vrcholek architektury a obsahuje hlavní logiku systému realizovanou pomocí stavového stroje s explicitním řízením toku aplikace. Stavový stroj je srdcem funkcionality a definuje pět různých stavů, mezi nimiž se aplikace cyklicky přepíná.
+
+\subsection*{Stavový stroj a základní funkčnost}
+
+Stavový stroj obsahuje následující stavy:
+
+\textbf{MEASURE} -- V tomto stavu systém asynchronně sběr dat ze všech dostupných senzorů. Měření probíhají v pravidelných intervalech (výchozí nastavení je jedna minuta). Systém postupně čte teplotu a tlak z BMP280 přes I2C, proud a napětí z INA219, vlhkost z půdního senzoru přes ADC a vysoké napětí z děliče napětí. Všechna naměřená data jsou časově označena a uložena v paměťové struktuře aplikace pro pozdější zpracování.
+
+\textbf{SEND} -- Po akumulaci dostatečného množství měření (standardně po jedné hodině) aplikace přechází do SEND stavu pro odeslání dat. Data jsou zabalena do datového paketu a odeslána bezdrátově přes LoRa rádio SX1278. Tento stav zajišťuje, že data jsou efektivně shromažďována lokálně a periodicky přenášena na vzdálené server nebo jiné zařízení. Komunikace přes LoRa poskytuje dlouhý dosah a nízký příkon energii.
+
+\textbf{STANDBY} -- Tento stav reprezentuje režim nízké energetické spotřeby, v němž systém minimalizuje spotřebu energie a čeká na další akci. Standby je důležitý pro aplikace na baterii, kde je třeba maximalizovat dobu provozu. V tomto stavu se vypínají senzory, které nejsou okamžitě potřebné, a snižuje se kmitočet procesoru.
+
+\textbf{TEST\_MEASURE} -- Speciální režim pro vývoj a diagnostiku systému s kratšími intervaly měření (5 sekund místo jedné minuty). Tento režim umožňuje rychlejší testování a ověřování funkčnosti všech senzorů bez čekání na standardní výrobní intervaly.
+
+\subsection*{Inicializace a operační workflow}
+
+Při spuštění aplikace se zavolá inicializační funkce \texttt{app::init()}, která sekvenčně iniciuje všechny dostupné hardwarové komponenty a senzory. Pokud iniciace kteréhokoli senzoru selže, aplikace to zaznamená a přechází do TEST\_MEASURE režimu pro diagnostiku. Pokud je vypnut hlavní LoRa rádio, aplikace upozorní uživatele a pracuje v TEST\_MEASURE režimu bez možnosti odesílání dat.
+
+Po úspěšné inicializaci se stavový stroj nastaví do výchozího stavu (standardně MEASURE) a začíná hlavní event loop. Stavový stroj periodicky kontroluje, zda je čas pro přechod do dalšího stavu na základě uplynulého času. Interní časovače sledují poslední měření a poslední odeslání dat. Pokud je napětí baterie nižší než minimální práh (3,5 V), systém automaticky přechází do STANDBY režimu pro ochranu baterie.
+
+\subsection*{Zpracování dat a komunikace}
+
+Aplikace zásadně odděluje sběr data od jejich odesílání. V MEASURE stavu jsou data sbírána a ukládána lokálně. Tímto přístupem se miniature případ ztráty dat při komunikačních poruchách -- pokud se data nepodaří odeslat najednou, jsou stále dostupná pro pozdější pokus. Data jsou také automaticky archivována na SD kartu pro dlouhodobé uchování a pozdější analýzu.
+
+Bezdrátová komunikace přes SX1278 LoRa rádio poskytuje robustní spojení i na dlouhé vzdálenosti s nízkou spotřebou energie. Rádio podporuje různé kmitočty a módy modulace pro optimalizaci na konkrétní nasazení. Například pro aplikace vyžadující vyšší propustnost lze zvolit nižší přenos na vyšší frekvenční pásmo, zatímco pro velmi vzdálené stanice lze využít nižší datové rychlosti pro zvýšenou dosahu.
+
+Systém je navržen s ohledem na energetickou efektivitu. Všechny komponenty se aktivují pouze tehdy, když jsou potřebné. Analogově-digitální převodník se zapíná pouze během měření, I2C sbenice se aktivuje při přístupu k senzorům a LoRa rádio se zapíná pouze během odesílání. Tímto přístupem se minimalizuje celková spotřeba energie a prodlužuje se doba provozu na baterii.
+
+\end{document}

@@ -152,24 +152,11 @@ namespace
     drivers::VoltageDivider::Config make_divider1_config()
     {
         return drivers::VoltageDivider::Config{
-            .channel = 0U,
-            .adc_reference_voltage = 3.3f,
-            .r_top_ohm = 30000.0f,
-            .r_bottom_ohm = 10000.0f,
-            .max_input_voltage = 16.0f,
-            .adc_max_count = 4095U,
-            .clock_div = 0.0f
-        };
-    }
-
-    drivers::VoltageDivider::Config make_divider2_config()
-    {
-        return drivers::VoltageDivider::Config{
             .channel = 1U,
             .adc_reference_voltage = 3.3f,
-            .r_top_ohm = 47000.0f,
-            .r_bottom_ohm = 10000.0f,
-            .max_input_voltage = 20.0f,
+            .r_top_ohm = 100000.0f,
+            .r_bottom_ohm = 100000.0f,
+            .max_input_voltage = 16.0f,
             .adc_max_count = 4095U,
             .clock_div = 0.0f
         };
@@ -231,13 +218,13 @@ namespace
         };
     }
 
-    hal::GPIO::Config make_dio0_gpio_config()
+    hal::GPIO::Config make_dio0_gpio_config() 
     {
         return hal::GPIO::Config{
             .pin = 21U,
             .is_output = false,
             .initial_high = false,
-            .pull_up = false,
+            .pull_up = true,
             .pull_down = false
         };
     }
@@ -253,16 +240,27 @@ namespace
             .sync_word = 0x12U,
             .tx_power_dbm = 17,
             .crc_enabled = true,
-            .rx_timeout_ms = 100U
+            .rx_timeout_ms = 300U
         };
     }
 
     hal::GPIO::Config make_humidity_power_gpio_config()
     {
         return hal::GPIO::Config{
-            .pin = 23U, // Nastav správný pin dle zapojení MOSFETu
+            .pin = 15U, // Nastav správný pin dle zapojení MOSFETu
             .is_output = true,
             .initial_high = false, // Po startu vypnuto
+            .pull_up = false,
+            .pull_down = false
+        };
+    }
+
+    hal::GPIO::Config make_status_led_gpio_config()
+    {
+        return hal::GPIO::Config{
+            .pin = 25U, // Stavova LED na Pico
+            .is_output = true,
+            .initial_high = false, // Rozsviti se az po uspesne inicializaci
             .pull_up = false,
             .pull_down = false
         };
@@ -279,7 +277,6 @@ namespace app
           i2c_ina219(make_i2c_config(0x40U), i2c_backend),
           adc_backend(),
           voltage_divider_1(adc_backend, make_divider1_config()),
-          voltage_divider_2(adc_backend, make_divider2_config()),
           spi_backend(),
           spi(make_spi_config(), spi_backend),
           gpio_nss_backend(),
@@ -299,7 +296,9 @@ namespace app
           sx1278(spi, gpio_nss, gpio_reset, gpio_dio0, timer, make_sx1278_config()),
           soil_sensor(0),
           gpio_humidity_power_backend(),
-          gpio_humidity_power(make_humidity_power_gpio_config(), gpio_humidity_power_backend)
+            gpio_humidity_power(make_humidity_power_gpio_config(), gpio_humidity_power_backend),
+            gpio_status_led_backend(),
+            gpio_status_led(make_status_led_gpio_config(), gpio_status_led_backend)
     {
     }
 
@@ -414,13 +413,6 @@ namespace app
         }
         log_init_checkpoint("Voltage divider 1 initialized");
 
-        if (!context.voltage_divider_2.init())
-        {
-            set_last_init_error("voltage_divider_2.init() failed");
-            return false;
-        }
-        log_init_checkpoint("Voltage divider 2 initialized");
-
 
         context.soil_sensor.init();
         log_init_checkpoint("Soil moisture sensor initialized");
@@ -441,13 +433,26 @@ namespace app
 
         if (!context.sx1278.init())
         {
-            log_init_checkpoint("SX1278 init failed!");
+            log_init_checkpoint("SX1278 init failed! Přecházím do testovacího režimu.");
             set_last_init_error("sx1278.init() failed");
         }
         else
         {
             log_init_checkpoint("SX1278 initialized");
         }
+
+        if (!context.gpio_status_led.init())
+        {
+            set_last_init_error("gpio_status_led.init() failed (pin 25)");
+            return false;
+        }
+
+        if (!context.gpio_status_led.write(true))
+        {
+            set_last_init_error("gpio_status_led.write() failed (pin 25)");
+            return false;
+        }
+        log_init_checkpoint("Status LED initialized");
 
         set_last_init_error("none");
         log_init_checkpoint("Initialization finished successfully");

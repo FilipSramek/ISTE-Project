@@ -5,6 +5,7 @@
 
 #include "drivers/sx1278/sx1278.hpp"
 
+#include <stdio.h>
 #include "utils/assert/assert.hpp"
 
 namespace drivers
@@ -33,30 +34,73 @@ namespace drivers
 		ASSERT(!initialized_);
 		ASSERT(config_.frequency_hz != 0U);
 
+		printf("[SX1278] Initializing radio (freq=%lu Hz, SF=%u, BW=%u)\n",
+		        config_.frequency_hz,
+		        static_cast<uint32_t>(config_.spreading_factor),
+		        static_cast<uint32_t>(config_.bandwidth));
+
 		if (initialized_ || !is_valid_config_())
 		{
+			printf("[SX1278] Init failed: invalid config or already initialized\n");
 			return false;
 		}
 
-		if (!reset_radio_() || !set_mode_(MODE_SLEEP))
+		printf("[SX1278] DEBUG: Resetting radio...\n");
+		if (!reset_radio_())
 		{
+			printf("[SX1278] DEBUG: Reset failed!\n");
 			return false;
 		}
+		printf("[SX1278] DEBUG: Reset done, setting mode to SLEEP...\n");
+		
+		if (!set_mode_(MODE_SLEEP))
+		{
+			printf("[SX1278] DEBUG: Failed to set mode to SLEEP!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: Mode set to SLEEP\n");
 
+		// Test DIO0 pin
+		printf("[SX1278] DEBUG: Testing DIO0 pin...\n");
+		bool dio0_state = false;
+		for (int i = 0; i < 5; i++)
+		{
+			if (!dio0_.read(dio0_state))
+			{
+				printf("[SX1278] DEBUG: DIO0 read failed!\n");
+				return false;
+			}
+			printf("[SX1278] DEBUG: DIO0 state=%d (read %d/5)\n", dio0_state ? 1 : 0, i + 1);
+			timer_.delay_ms(10);
+		}
+
+		printf("[SX1278] DEBUG: Reading VERSION register...\n");
 		uint8_t version = 0U;
 		if (!read_register_(Register::VERSION, version))
 		{
+			printf("[SX1278] Init failed: could not read version (SPI error)\n");
+			return false;
+		}
+
+		printf("[SX1278] Version: 0x%02X (expected 0x%02X)\n", version, SX1278_VERSION);
+		
+		if (version == 0x00U)
+		{
+			printf("[SX1278] ERROR: Version is 0x00 - possible SPI connection issue!\n");
+			printf("[SX1278] Check: NSS pin, MOSI/MISO/CLK, RESET pin, hardware connection\n");
 			return false;
 		}
 
 		if ((version != SX1278_VERSION) || !configure_radio_())
 		{
+			printf("[SX1278] Init failed: version mismatch (got 0x%02X, expected 0x%02X)\n", version, SX1278_VERSION);
 			return false;
 		}
 
 		initialized_ = true;
 		current_data_.valid = false;
 		reset_reassembly_();
+		printf("[SX1278] Initialization complete\n");
 		return true;
 	}
 
@@ -103,6 +147,7 @@ namespace drivers
 		data.crc_error = ((irq_flags & IRQ_PAYLOAD_CRC_ERROR) != 0U);
 		if (data.crc_error)
 		{
+			printf("[SX1278] RX error: CRC failure\n");
 			(void)clear_irq_flags_();
 			(void)enter_standby_();
 			data.valid = false;
@@ -133,6 +178,11 @@ namespace drivers
 		}
 
 		data.valid = clear_irq_flags_() && enter_standby_();
+		if (data.valid)
+		{
+			printf("[SX1278] RX: %lu bytes, RSSI=%d dBm, SNR=%d cB\n",
+			        data.length, data.rssi_dbm, data.snr_cdb);
+		}
 		return data.valid;
 	}
 
@@ -175,26 +225,104 @@ namespace drivers
 
 		if ((!initialized_) || (payload == nullptr) || (length == 0U) || (length > MAX_PAYLOAD_BYTES))
 		{
+			printf("[SX1278] TX error: invalid parameters\n");
 			return false;
 		}
 
-		if (!enter_standby_() ||
-		    !clear_irq_flags_() ||
-		    !write_register_(Register::FIFO_ADDR_PTR, 0x00U) ||
-		    !write_burst_(Register::FIFO, payload, length) ||
-		    !write_register_(Register::PAYLOAD_LENGTH, static_cast<uint8_t>(length)) ||
-		    !set_mode_(MODE_TX) ||
-		    !wait_for_dio0_(config_.rx_timeout_ms))
+		printf("[SX1278] TX: sending %lu bytes\n", length);
+
+		printf("[SX1278] DEBUG TX: entering standby...\n");
+		if (!enter_standby_())
 		{
-			(void)enter_standby_();
+			printf("[SX1278] DEBUG TX: enter_standby failed!\n");
 			return false;
+		}
+		printf("[SX1278] DEBUG TX: standby OK\n");
+
+		printf("[SX1278] DEBUG TX: clearing IRQ flags...\n");
+		if (!clear_irq_flags_())
+		{
+			printf("[SX1278] DEBUG TX: clear_irq_flags failed!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: IRQ flags cleared\n");
+
+		printf("[SX1278] DEBUG TX: setting FIFO_ADDR_PTR to 0x00...\n");
+		if (!write_register_(Register::FIFO_ADDR_PTR, 0x00U))
+		{
+			printf("[SX1278] DEBUG TX: write FIFO_ADDR_PTR failed!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: FIFO_ADDR_PTR set\n");
+
+		printf("[SX1278] DEBUG TX: writing %lu bytes to FIFO...\n", length);
+		if (!write_burst_(Register::FIFO, payload, length))
+		{
+			printf("[SX1278] DEBUG TX: write_burst failed!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: payload written to FIFO\n");
+
+		printf("[SX1278] DEBUG TX: setting PAYLOAD_LENGTH to %u...\n", static_cast<uint32_t>(length));
+		if (!write_register_(Register::PAYLOAD_LENGTH, static_cast<uint8_t>(length)))
+		{
+			printf("[SX1278] DEBUG TX: write PAYLOAD_LENGTH failed!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: PAYLOAD_LENGTH set\n");
+
+		printf("[SX1278] DEBUG TX: setting MODE_TX...\n");
+		if (!set_mode_(MODE_TX))
+		{
+			printf("[SX1278] DEBUG TX: set_mode(MODE_TX) failed!\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: MODE_TX set\n");
+
+		// Ověř OP_MODE register
+		uint8_t op_mode = 0U;
+		if (!read_register_(Register::OP_MODE, op_mode))
+		{
+			printf("[SX1278] DEBUG TX: failed to read OP_MODE\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: OP_MODE verification read=0x%02X (MODE_TX=0x%02X)\n", 
+		       op_mode, MODE_LONG_RANGE | MODE_TX);
+
+		printf("[SX1278] DEBUG TX: MODE_TX set, waiting for TX_DONE (timeout=%u ms)...\n", config_.rx_timeout_ms);
+
+		if (!wait_for_dio0_(config_.rx_timeout_ms))
+		{
+			printf("[SX1278] DEBUG TX: TX_DONE timeout! Checking IRQ_FLAGS anyway...\n");
 		}
 
 		uint8_t irq_flags = 0U;
-		return read_register_(Register::IRQ_FLAGS, irq_flags) &&
-		       ((irq_flags & IRQ_TX_DONE) != 0U) &&
-		       clear_irq_flags_() &&
-		       enter_standby_();
+		if (!read_register_(Register::IRQ_FLAGS, irq_flags))
+		{
+			printf("[SX1278] TX error: failed to read IRQ_FLAGS\n");
+			(void)enter_standby_();
+			return false;
+		}
+		printf("[SX1278] DEBUG TX: Final IRQ_FLAGS=0x%02X (TX_DONE=%d, RX_DONE=%d, CAD_DONE=%d)\n", 
+		       irq_flags, 
+		       (irq_flags & 0x08) ? 1 : 0,  // Bit 3 = TX_DONE
+		       (irq_flags & 0x40) ? 1 : 0,  // Bit 6 = RX_DONE
+		       (irq_flags & 0x04) ? 1 : 0); // Bit 2 = CAD_DONE
+
+		const bool success = ((irq_flags & IRQ_TX_DONE) != 0U) && 
+		                     clear_irq_flags_() && 
+		                     enter_standby_();
+
+		if (success)
+		{
+			printf("[SX1278] TX: transmission complete (irq_flags=0x%02X)\n", irq_flags);
+		}
+		else
+		{
+			printf("[SX1278] TX error: transmission failed (irq_flags=0x%02X, TX_DONE=%d)\n", 
+			       irq_flags, ((irq_flags & IRQ_TX_DONE) != 0U) ? 1 : 0);
+		}
+		return success;
 	}
 
 	bool SX1278::send_message(const uint8_t* payload, uint32_t length)
@@ -204,6 +332,7 @@ namespace drivers
 
 		if ((!initialized_) || (payload == nullptr) || (length == 0U) || (length > MAX_MESSAGE_BYTES))
 		{
+			printf("[SX1278] Message TX error: invalid parameters\n");
 			return false;
 		}
 
@@ -218,10 +347,16 @@ namespace drivers
 		const uint8_t fragment_count = static_cast<uint8_t>((length + MAX_FRAGMENT_PAYLOAD_BYTES - 1U) / MAX_FRAGMENT_PAYLOAD_BYTES);
 		uint32_t offset = 0U;
 
+		printf("[SX1278] Message TX: ID=%u, len=%lu, fragments=%u\n",
+		        message_id, length, fragment_count);
+
 		for (uint8_t fragment_index = 0U; fragment_index < fragment_count; ++fragment_index)
 		{
 			uint8_t frame[MAX_PAYLOAD_BYTES] = {0U};
 			uint32_t frame_length = 0U;
+
+			printf("[SX1278] Message TX: sending fragment %u/%u\n",
+			        fragment_index + 1U, fragment_count);
 
 			if (!build_fragment_(payload,
 			                     length,
@@ -234,12 +369,14 @@ namespace drivers
 			                     frame_length) ||
 			    !send(frame, frame_length))
 			{
+				printf("[SX1278] Message TX error: fragment %u failed\n", fragment_index + 1U);
 				return false;
 			}
 
 			offset += static_cast<uint32_t>(frame[9]);
 		}
 
+		printf("[SX1278] Message TX: complete\n");
 		return true;
 	}
 
@@ -251,9 +388,11 @@ namespace drivers
 		length = 0U;
 		if ((!initialized_) || (payload == nullptr) || (capacity == 0U) || (capacity > MAX_MESSAGE_BYTES))
 		{
+			printf("[SX1278] Message RX error: invalid parameters\n");
 			return false;
 		}
 
+		printf("[SX1278] Message RX: starting reassembly (capacity=%lu)\n", capacity);
 		reset_reassembly_();
 		for (uint32_t i = 0U; i < MAX_FRAGMENT_COUNT; ++i)
 		{
@@ -263,15 +402,21 @@ namespace drivers
 
 			if (!read(packet) || !parse_fragment_(packet, header, fragment_payload) || !accept_fragment_(header, fragment_payload))
 			{
+				printf("[SX1278] Message RX error: fragment parse/accept failed\n");
 				reset_reassembly_();
 				return false;
 			}
+
+			printf("[SX1278] Message RX: fragment %u/%u received (%lu bytes)\n",
+			        reassembly_.next_fragment_index, reassembly_.fragment_count,
+			        static_cast<uint32_t>(header.fragment_length));
 
 			if (reassembly_.active && (reassembly_.next_fragment_index >= reassembly_.fragment_count))
 			{
 				if ((reassembly_.total_length > capacity) ||
 				    (crc16_ccitt_(reassembly_.payload, reassembly_.total_length) != reassembly_.payload_crc16))
 				{
+					printf("[SX1278] Message RX error: capacity exceeded or CRC mismatch\n");
 					reset_reassembly_();
 					return false;
 				}
@@ -282,11 +427,13 @@ namespace drivers
 				}
 
 				length = reassembly_.total_length;
+				printf("[SX1278] Message RX: complete (%lu bytes)\n", length);
 				reset_reassembly_();
 				return true;
 			}
 		}
 
+		printf("[SX1278] Message RX error: timeout waiting for fragments\n");
 		reset_reassembly_();
 		return false;
 	}
@@ -343,13 +490,27 @@ namespace drivers
 		uint8_t rx[2] = {0U, 0U};
 		uint32_t length = 2U;
 
+		if (reg == Register::OP_MODE)
+		{
+			printf("[SX1278] DEBUG write_register OP_MODE: tx[0]=0x%02X (0x01|0x80), tx[1]=0x%02X (value)\n", 
+			       tx[0], tx[1]);
+		}
+
 		if (!nss_.write(false))
 		{
+			printf("[SX1278] DEBUG write_register: NSS low failed\n");
 			return false;
 		}
 
 		const bool ok = spi_.transfer(tx, rx, length);
 		const bool deassert_ok = nss_.write(true);
+		
+		if (reg == Register::OP_MODE)
+		{
+			printf("[SX1278] DEBUG write_register OP_MODE: SPI ok=%d, deassert=%d\n", 
+			       ok ? 1 : 0, deassert_ok ? 1 : 0);
+		}
+		
 		return ok && deassert_ok;
 	}
 
@@ -364,12 +525,28 @@ namespace drivers
 
 		if (!nss_.write(false))
 		{
+			printf("[SX1278] DEBUG read_register: NSS low failed\n");
 			return false;
 		}
 
 		const bool ok = spi_.transfer(tx, rx, length);
 		const bool deassert_ok = nss_.write(true);
+		
+		if (!ok)
+		{
+			printf("[SX1278] DEBUG read_register: SPI transfer failed for reg 0x%02X\n", static_cast<uint8_t>(reg));
+		}
+		if (!deassert_ok)
+		{
+			printf("[SX1278] DEBUG read_register: NSS high failed\n");
+		}
+		
 		value = rx[1];
+		if (reg == Register::VERSION)
+		{
+			printf("[SX1278] DEBUG read_register: VERSION - tx[0]=0x%02X, rx[1]=0x%02X (ok=%d, deassert=%d)\n",
+			       tx[0], rx[1], ok ? 1 : 0, deassert_ok ? 1 : 0);
+		}
 		return ok && deassert_ok;
 	}
 
@@ -436,7 +613,14 @@ namespace drivers
 		ASSERT((mode_bits & 0x07U) == mode_bits);
 		ASSERT(MODE_LONG_RANGE == 0x80U);
 
-		return write_register_(Register::OP_MODE, static_cast<uint8_t>(MODE_LONG_RANGE | mode_bits));
+		const uint8_t full_mode = static_cast<uint8_t>(MODE_LONG_RANGE | mode_bits);
+		printf("[SX1278] DEBUG set_mode: mode_bits=0x%02X, MODE_LONG_RANGE=0x80, full_mode=0x%02X\n",
+		       mode_bits, full_mode);
+		
+		const bool result = write_register_(Register::OP_MODE, full_mode);
+		printf("[SX1278] DEBUG set_mode: write_register returned %d\n", result ? 1 : 0);
+		
+		return result;
 	}
 
 	bool SX1278::enter_standby_()
@@ -461,25 +645,62 @@ namespace drivers
 		ASSERT(MAX_IRQ_WAIT_ITERS != 0U);
 
 		const uint64_t start_time = timer_.now();
+		printf("[SX1278] DEBUG: wait_for_tx_done start - polling IRQ_FLAGS for TX_DONE, timeout=%u ms\n", timeout_ms);
+
+		// Primárně čekáme na TX_DONE bit (bit 3) v IRQ_FLAGS registru
+		// DIO0 pin není potřeba - Registry se čte přímo
 		for (uint32_t i = 0U; i < MAX_IRQ_WAIT_ITERS; ++i)
 		{
-			bool dio0_high = false;
-			if (!dio0_.read(dio0_high))
+			uint8_t irq_flags = 0U;
+			if (!read_register_(Register::IRQ_FLAGS, irq_flags))
 			{
+				printf("[SX1278] DEBUG: Failed to read IRQ_FLAGS at iteration %u\n", i);
 				return false;
 			}
 
-			if (dio0_high)
+			// Loguj každých 5000 iterací aby se log nezaplnil
+			if (i % 5000 == 0)
 			{
+				printf("[SX1278] DEBUG: Iteration %u - IRQ_FLAGS=0x%02X (TX_DONE=%d, RX_DONE=%d, CAD_DONE=%d)\n", 
+				       i, irq_flags, 
+				       (irq_flags & 0x08) ? 1 : 0,  // Bit 3 = TX_DONE
+				       (irq_flags & 0x40) ? 1 : 0,  // Bit 6 = RX_DONE
+				       (irq_flags & 0x04) ? 1 : 0); // Bit 2 = CAD_DONE
+			}
+
+			// Čekáme na TX_DONE bit (bit 3)
+			if ((irq_flags & 0x08) != 0U)
+			{
+				printf("[SX1278] DEBUG: TX_DONE bit set in IRQ_FLAGS at iteration %u (took ~%u ms)\n", 
+				       i, timer_.elapsed_ms(start_time));
+				return true;
+			}
+
+			// Pokud RX_DONE bit (bit 6) - pro RX mód
+			if ((irq_flags & 0x40) != 0U)
+			{
+				printf("[SX1278] DEBUG: RX_DONE bit set in IRQ_FLAGS at iteration %u (took ~%u ms)\n", 
+				       i, timer_.elapsed_ms(start_time));
 				return true;
 			}
 
 			if (timer_.is_timeout_ms(start_time, timeout_ms))
 			{
+				printf("[SX1278] DEBUG: Timeout after %u ms (iteration %u/%u)\n", 
+				       timeout_ms, i, MAX_IRQ_WAIT_ITERS);
+				// Čteme IRQ_FLAGS ještě jednou na konci
+				uint8_t irq_final = 0U;
+				if (!read_register_(Register::IRQ_FLAGS, irq_final))
+				{
+					irq_final = 0xFF;
+				}
+				printf("[SX1278] DEBUG: Final IRQ_FLAGS=0x%02X at timeout (TX_DONE=%d, RX_DONE=%d)\n", 
+				       irq_final, (irq_final & 0x08) ? 1 : 0, (irq_final & 0x40) ? 1 : 0);
 				return false;
 			}
 		}
 
+		printf("[SX1278] DEBUG: Exceeded MAX_IRQ_WAIT_ITERS (%u) without TX/RX_DONE or timeout\n", MAX_IRQ_WAIT_ITERS);
 		return false;
 	}
 
@@ -488,16 +709,89 @@ namespace drivers
 		ASSERT(config_.sync_word != 0U);
 		ASSERT(config_.preamble_length != 0U);
 
-		return enter_standby_() &&
-		       set_frequency_() &&
-		       write_register_(Register::FIFO_TX_BASE_ADDR, 0x00U) &&
-		       write_register_(Register::FIFO_RX_BASE_ADDR, 0x00U) &&
-		       write_register_(Register::LNA, 0x23U) &&
-		       write_register_(Register::SYNC_WORD, config_.sync_word) &&
-		       write_register_(Register::DIO_MAPPING1, 0x00U) &&
-		       set_tx_power_() &&
-		       configure_modem_() &&
-		       clear_irq_flags_();
+		printf("[SX1278] DEBUG: configure_radio start\n");
+
+		if (!enter_standby_())
+		{
+			printf("[SX1278] DEBUG: enter_standby failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: enter_standby OK\n");
+
+		if (!set_frequency_())
+		{
+			printf("[SX1278] DEBUG: set_frequency failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: set_frequency OK\n");
+
+		if (!write_register_(Register::FIFO_TX_BASE_ADDR, 0x00U))
+		{
+			printf("[SX1278] DEBUG: write FIFO_TX_BASE_ADDR failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: FIFO_TX_BASE_ADDR OK\n");
+
+		if (!write_register_(Register::FIFO_RX_BASE_ADDR, 0x00U))
+		{
+			printf("[SX1278] DEBUG: write FIFO_RX_BASE_ADDR failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: FIFO_RX_BASE_ADDR OK\n");
+
+		if (!write_register_(Register::LNA, 0x23U))
+		{
+			printf("[SX1278] DEBUG: write LNA failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: LNA OK\n");
+
+		if (!write_register_(Register::SYNC_WORD, config_.sync_word))
+		{
+			printf("[SX1278] DEBUG: write SYNC_WORD failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: SYNC_WORD OK\n");
+
+		if (!write_register_(Register::DIO_MAPPING1, 0x00U))
+		{
+			printf("[SX1278] DEBUG: write DIO_MAPPING1 failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: DIO_MAPPING1 OK (0x00)\n");
+
+		// Ověř DIO_MAPPING1 zpátky
+		uint8_t dio_mapping1_read = 0U;
+		if (!read_register_(Register::DIO_MAPPING1, dio_mapping1_read))
+		{
+			printf("[SX1278] DEBUG: read DIO_MAPPING1 failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: DIO_MAPPING1 verification read=0x%02X\n", dio_mapping1_read);
+
+		if (!set_tx_power_())
+		{
+			printf("[SX1278] DEBUG: set_tx_power failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: set_tx_power OK\n");
+
+		if (!configure_modem_())
+		{
+			printf("[SX1278] DEBUG: configure_modem failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: configure_modem OK\n");
+
+		if (!clear_irq_flags_())
+		{
+			printf("[SX1278] DEBUG: clear_irq_flags failed\n");
+			return false;
+		}
+		printf("[SX1278] DEBUG: clear_irq_flags OK\n");
+
+		printf("[SX1278] DEBUG: configure_radio complete\n");
+		return true;
 	}
 
 	bool SX1278::set_frequency_()

@@ -25,7 +25,6 @@ namespace app
 
         hal::PicoADCBackend adc_backend;
         drivers::VoltageDivider voltage_divider_1;
-        drivers::VoltageDivider voltage_divider_2;
 
         hal::PicoSPIBackend spi_backend;
         hal::SPI spi;
@@ -54,6 +53,10 @@ namespace app
         // Napájení humidity senzoru
         hal::PicoGPIOBackend gpio_humidity_power_backend;
         hal::GPIO gpio_humidity_power;
+
+        // Stavova LED po inicializaci
+        hal::PicoGPIOBackend gpio_status_led_backend;
+        hal::GPIO gpio_status_led;
     };
 
     bool init(AppContext& context);
